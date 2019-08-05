@@ -15,7 +15,15 @@ except ImportError:
     import Crypto.Hash.SHA as SHA1
 
 from Crypto.Cipher import DES3, AES
+
+import Crypto.Cipher.PKCS1_v1_5
+import Crypto.PublicKey.RSA
+
 import io
+
+def debugprint(msg):
+    #print(msg)
+    pass
 
 def hexdump(data):
     """
@@ -24,10 +32,16 @@ def hexdump(data):
     for o in range(0, len(data), 16):
         line = "%04x:" % o
         for i in range(16):
-            line += " %02x" % data[o+i]
+            if o+i < len(data):
+                line += " %02x" % data[o+i]
+            else:
+                line += "   "
         line += "  "
         for i in range(16):
-            line += "%c" % data[o+i] if 32 <= data[o+i] <= 126 else "."
+            if o+i < len(data):
+                line += "%c" % data[o+i] if 32 <= data[o+i] <= 126 else "."
+            else:
+                line += " "
         print(line)
 
 def hmacsha1(key, data):
@@ -64,12 +78,17 @@ CSSM_ALGID_3DES_3KEY_EDE  = 0x11
 CSSM_PADDING_PKCS7 = 7
 CSSM_ALGMODE_CBCPadIV8 = 6
 
-class WrappedKey:
+
+CSSM_APPLE_UNLOCK_TYPE_KEY_DIRECT               = 1 # master secret key stored directly
+CSSM_APPLE_UNLOCK_TYPE_WRAPPED_PRIVATE          = 2 # master key wrapped by public key
+CSSM_APPLE_UNLOCK_TYPE_KEYBAG                   = 3 # master key wrapped via keybag
+
+class PassphraseWrappedKey:
     """
     A encrcdsa v2 wrapped key.
     """
     wrappedkeyinfo = [
-( 0x0000, "kdfAlgorithm",         "L"),   # 0x67  CSSM_ALGID_PKCS5_PBKDF2 
+( 0x0000, "kdfAlgorithm",         "L"),   # 0x67  CSSM_ALGID_PKCS5_PBKDF2
 ( 0x0004, "kdfIterationCount",    "Q"),   # between 0x10000 and 0x50000
 ( 0x000c, "kdfSaltLen",           "L"),   # in bytes - 20
 ( 0x0010, "kdfSalt",              "32s"), 
@@ -99,7 +118,7 @@ class WrappedKey:
         self.encryptedKeyblob = data[0x68:]
 
     def dump(self):
-        print("------ WrappedKey ------")
+        print("------ PassphraseWrappedKey ------")
         for o, aname, atype in self.wrappedkeyinfo:
             val = getattr(self, aname)
             if type(val) == bytes:
@@ -122,12 +141,13 @@ class WrappedKey:
         else:
             return True
 
-    def unwrapkey(self, passphrase, bypasskdf = False):
+    def unwrapkey(self, passphrase, **kwargs):
         """
         decrypt the key using a passphrase.
         """
-        if not bypasskdf:
+        if not kwargs.get('skipkdf'):
             hashedpw = pbkdf2(passphrase, self.kdfSalt[:self.kdfSaltLen], self.kdfIterationCount)
+            debugprint("hashedpw = %s" % b2a_hex(hashedpw))
             deskey = hashedpw[:self.blobEncKeyBits//8]
             iv = self.blobEncIv[:self.blobEncIvLen]
         else:
@@ -136,13 +156,112 @@ class WrappedKey:
 
         des = DES3.new(deskey, mode=DES3.MODE_CBC, IV=iv)
         unwrappeddata = des.decrypt(self.encryptedKeyblob[:self.encryptedKeyblobLen])
+        debugprint("deskey = %s" % b2a_hex(deskey))
+        debugprint("iv = %s" % b2a_hex(iv))
+        debugprint("unwrappeddata = %s" % b2a_hex(unwrappeddata))
         keydata = remove_pkcs7_padding(unwrappeddata, self.blobEncIvLen)
+        debugprint("keydata = %s" % b2a_hex(keydata))
 
         if keydata[-5:] != b'CKIE\x00':
             print("v2 unwrap: missing CKIE suffix: %s" % b2a_hex(keydata[-5:]))
 
         return keydata[:-5]
 
+class CertificateWrappedKey:
+    """
+    A encrcdsa v2 cert wrapped key.
+    """
+    wrappedkeyinfo = [
+( 0x0000, "pubkeyHashLength",     "L"),   # 0x14 
+( 0x0004, "pubkeyHash",           "20s"),
+( 0x0018, "unk1",                 "L"),   # 0
+( 0x001c, "unk2",                 "L"),   # 0
+( 0x0020, "unk3",                 "L"),   # 0
+( 0x0024, "alg1",                 "L"),   # 42 == RSA
+( 0x0028, "unk4",                 "L"),   # 10
+( 0x002c, "unk5",                 "L"),   # 0
+( 0x0030, "unk6",                 "L"),   # 0x100
+( 0x0068, "wrappedKey",           "256s"), 
+    ]
+    def __init__(self, data):
+        (
+        self.pubkeyHashLength,     # CSSM_ALGID_PKCS5_PBKDF2 
+        self.pubkeyHash,
+        self.unk1, 
+        self.unk2, 
+        self.unk3, 
+        self.alg1, 
+        self.unk4, 
+        self.unk5, 
+        self.unk6, 
+        self.wrappedKey,       # 0x14
+        ) = struct.unpack(">L20s7L256s", data[:0x134])
+
+    def dump(self):
+        print("------ CertificateWrappedKey ------")
+        for o, aname, atype in self.wrappedkeyinfo:
+            val = getattr(self, aname)
+            if type(val) == bytes:
+                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
+            else:
+                print("%04x: %-40s 0x%08x" % (o, aname, val))
+
+    def isvalid(self):
+        """
+        Check if we can decode this wrapped key.
+        """
+        if self.pubkeyHashLength != 20:
+            print("unsupported cert hash size: %d" % self.pubkeyHashLength)
+        elif self.alg1!= 42:
+            print("unsupported wrap algorithm: %d" % self.alg1)
+        else:
+            return True
+
+    def unwrapkey(self, privkey, **kwargs):
+        """
+        decrypt the key using a private key
+        """
+        cipher = Crypto.Cipher.PKCS1_v1_5.new(privkey)
+        keydata = cipher.decrypt(self.wrappedKey, b'xxxxx')
+
+        if keydata[-5:] != b'CKIE\x00':
+            print("v2 unwrap: missing CKIE suffix: %s" % b2a_hex(keydata[-5:]))
+
+        return keydata[:-5]
+
+
+class BaggedKey:
+    """
+    A encrcdsa v2 key-bag
+
+    TODO - figure out how this works
+    """
+    wrappedkeyinfo = [
+( 0x0000, "keybag",     "128s"),
+    ]
+    def __init__(self, data):
+        self.keybag = data
+
+    def dump(self):
+        print("------ KeyBag ------")
+        for o, aname, atype in self.wrappedkeyinfo:
+            val = getattr(self, aname)
+            if type(val) == bytes:
+                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
+            else:
+                print("%04x: %-40s 0x%08x" % (o, aname, val))
+
+    def isvalid(self):
+        """
+        Check if we can decode this wrapped key.
+        """
+        return True
+
+    def unwrapkey(self, privkey, **kwargs):
+        """
+        decrypt the key using a private key
+        """
+        return None
 
 
 CSSM_ALGMODE_CBC_IV8  = 5
@@ -168,8 +287,21 @@ class EncrCdsaFile:
 ( 0x0040, "offsetToDataStart",   "Q"),   # 0x01de00
 ( 0x0048, "nritems",             "L"),   # 1
 ]
+    @staticmethod
+    def hasmagic(fh):
+        fh.seek(0, io.SEEK_SET)
+        cdsatag = fh.read(12)
+        if not cdsatag:
+            return False
+        signature, version, = struct.unpack(">8sL", cdsatag)
+
+        return signature == b'encrcdsa' and version == 2
+
+    def nrblocks(self):
+        return (self.dataLen-1) // self.bytesPerBlock + 1
 
     def __init__(self, fh):
+        fh.seek(0, io.SEEK_SET)
         hdr = fh.read(0x10000)
         (
         self.signature,        # "encrcdsa"
@@ -200,16 +332,14 @@ class EncrCdsaFile:
             self.keyitems.append( (itemtype, itemoffset, itemsize) )
 
         self.wrappedkeys = []
-        self.pubkeys = []
-        self.filesigs = []
 
         for tp, of, sz in self.keyitems:
-            if tp == 1:
-                self.wrappedkeys.append(WrappedKey(hdr[of:of+sz]))
-            elif tp == 2:
-                self.pubkeys.append(hdr[of:of+sz])
-            elif tp == 3:
-                self.filesigs.append(hdr[of:of+sz])
+            if tp == CSSM_APPLE_UNLOCK_TYPE_KEY_DIRECT:
+                self.wrappedkeys.append(PassphraseWrappedKey(hdr[of:of+sz]))
+            elif tp == CSSM_APPLE_UNLOCK_TYPE_WRAPPED_PRIVATE:
+                self.wrappedkeys.append(CertificateWrappedKey(hdr[of:of+sz]))
+            elif tp == CSSM_APPLE_UNLOCK_TYPE_KEYBAG:
+                self.wrappedkeys.append(BaggedKey(hdr[of:of+sz]))
 
 
     def dump(self):
@@ -225,10 +355,6 @@ class EncrCdsaFile:
                 print("%04x: %-40s 0x%08x" % (o, aname, val))
         for wp in self.wrappedkeys:
             wp.dump()
-        for pk in self.pubkeys:
-            print("--pubkey  %s" % b2a_hex(pk))
-        for fs in self.filesigs:
-            print("--filesig  %s" % b2a_hex(fs))
 
     def isvalid(self):
         """
@@ -243,23 +369,20 @@ class EncrCdsaFile:
         else:
             return True
 
-    def login(self, passphrase, bypasskdf = False):
+    def login(self, passphrase, **kwargs):
         """
-        Authenticate
+        Authenticate v2
         """
         for i, wp in enumerate(self.wrappedkeys):
-            if not isinstance(wp, WrappedKey):
-                print("not a wrapped key: %s" % wp)
-                continue
             if not wp.isvalid():
+                print("key#%d - %s is not valid" % (i, type(wp)))
                 continue
-
             try:
-                keydata = wp.unwrapkey(passphrase, bypasskdf)
-                self.setkey(keydata)
-
-                print("FOUND: passphrase decodes wrappedkey # %d" % i)
-                break
+                keydata = wp.unwrapkey(passphrase, **kwargs)
+                if keydata:
+                    self.setkey(keydata)
+                    print("FOUND: passphrase decodes wrappedkey # %d" % i)
+                    return True
             except Exception as e:
                 pass
 
@@ -276,7 +399,11 @@ class EncrCdsaFile:
         data = fh.read(self.bytesPerBlock)
         iv = hmacsha1(self.hmackey, struct.pack(">L", blocknum))
         aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:16])
-        return aes.decrypt(data)
+        data = aes.decrypt(data)
+        if blocknum == self.nrblocks() - 1:
+            trunk = self.dataLen % self.bytesPerBlock
+            return data[:trunk]
+        return data
 
 
 class CdsaEncrFile:
@@ -323,6 +450,19 @@ class CdsaEncrFile:
 ( 0x04f0, "version",             "L"   ),  # 
 ( 0x04f4, "signature",           "8s"  ),  # 
             ]
+    @staticmethod
+    def hasmagic(fh):
+        fh.seek(-12, io.SEEK_END)
+        cdsatag = fh.read(12)
+        if not cdsatag:
+            return False
+        version, signature = struct.unpack(">L8s", cdsatag)
+
+        return signature == b'cdsaencr' and version == 1
+
+    def nrblocks(self):
+        return (self.offsetToHeader-1) // self.bytesPerBlock + 1
+
     def __init__(self, fh):
         self.offsetToDataStart = 0
 
@@ -406,29 +546,29 @@ class CdsaEncrFile:
             else:
                 print("%04x: %-40s 0x%08x" % (o, aname, val))
 
-    def getHmacKey(self, passphrase, bypasskdf = False):
+    def getHmacKey(self, passphrase, **kwargs):
         """
         decodes the hmac key
         """
-        return self.unwrapkey(passphrase, self.wrappedHmacKey[:self.wrappedHmacKeyLen], bypasskdf)
+        return self.unwrapkey(passphrase, self.wrappedHmacKey[:self.wrappedHmacKeyLen], **kwargs)
 
-    def getIntegrityKey(self, passphrase, bypasskdf = False):
+    def getIntegrityKey(self, passphrase, **kwargs):
         """
         decodes the integrity key
         """
-        return self.unwrapkey(passphrase, self.wrappedIntegrityKey[:self.wrappedIntegrityKeyLen], bypasskdf)
+        return self.unwrapkey(passphrase, self.wrappedIntegrityKey[:self.wrappedIntegrityKeyLen], **kwargs)
 
-    def getAesKey(self, passphrase, bypasskdf = False):
+    def getAesKey(self, passphrase, **kwargs):
         """
         decodes the aes key
         """
-        return self.unwrapkey(passphrase, self.wrappedAesKey[:self.wrappedAesKeyLen], bypasskdf)
+        return self.unwrapkey(passphrase, self.wrappedAesKey[:self.wrappedAesKeyLen], **kwargs)
 
-    def unwrapkey(self, passphrase, blob, bypasskdf = False):
+    def unwrapkey(self, passphrase, blob, **kwargs):
         """
         Unwraps the keys using the algorithm specified in rfc3217 or rfc3537 
         """
-        if not bypasskdf:
+        if not kwargs.get('skipkdf'):
             hashedpw = pbkdf2(passphrase, self.kdfSalt[:self.kdfSaltLen], self.kdfIterationCount)
             deskey = hashedpw[:self.blobEncKeyBits//8]
         else:
@@ -449,13 +589,15 @@ class CdsaEncrFile:
 
         return keydata[12:]
 
-    def login(self, passphrase, bypasskdf = False):
+    def login(self, passphrase, **kwargs):
         """
-        Authenticate
+        Authenticate v1
         """
-        self.aeskey = self.getAesKey(passphrase, bypasskdf)
-        self.hmackey = self.getHmacKey(passphrase, bypasskdf)
-        self.ikey = self.getIntegrityKey(passphrase, bypasskdf)
+        self.aeskey = self.getAesKey(passphrase, **kwargs)
+        self.hmackey = self.getHmacKey(passphrase, **kwargs)
+        self.ikey = self.getIntegrityKey(passphrase, **kwargs)
+
+        return True
 
     def setkey(self, keydata):
         self.aeskey = keydata[:self.keyBits//8]
@@ -473,7 +615,7 @@ class CdsaEncrFile:
         return aes.decrypt(data)
 
 
-def dumpblocks(args, enc, fh):
+def unlockfile(args, enc, fh):
     enc.dump()
 
     if args.password:
@@ -483,29 +625,57 @@ def dumpblocks(args, enc, fh):
     else:
         passphrase = None
 
+    if args.privatekey:
+        privatekey = Crypto.PublicKey.RSA.importKey(open(args.privatekey, "rb").read())
+    else:
+        privatekey = None
+
     if passphrase is not None:
-        enc.login(passphrase, bypasskdf = args.bypasskdf)
+        return enc.login(passphrase, skipkdf = args.skipkdf)
+    elif privatekey is not None:
+        return enc.login(privatekey)
     elif args.keydata:
         enc.setkey(a2b_hex(args.keydata))
+        return True
 
-    for bnum in range(0x10):
+def savedecrypted(enc, fh, filename):
+    with open(filename, "wb") as ofh:
+        for bnum in range(enc.nrblocks()):
+            data = enc.readblock(fh, bnum)
+            ofh.write(data)
+
+def dumpblocks(enc, fh):
+    for bnum in range(enc.nrblocks()):
         print("-- blk %d" % bnum)
         data = enc.readblock(fh, bnum)
         hexdump(data)
 
+def createdecryptedfilename(filename):
+    i = filename.rfind(".")
+    if i<0:
+        return filename + "-decrypted"
+    return filename[:i] + "-decrypted" + filename[i:]
 
-def processfile(args, fh):
+def processfile(args, filename, fh):
+    enc = None
     for cls in (EncrCdsaFile, CdsaEncrFile):
         try:
-            enc = cls(fh)
-            try:
-                dumpblocks(args, enc, fh)
-            except Exception as e:
-                print("ERR %s" % e)
-                if args.debug:
-                    raise
+            if cls.hasmagic(fh):
+                enc = cls(fh)
         except Exception as e:
             print("ERR %s" % e)
+            if args.debug:
+                raise
+    if not enc:
+        print("Did not find an encrypted disk image")
+        return
+    if not unlockfile(args, enc, fh):
+        print("unlock failed")
+        return
+    if args.save:
+        savedecrypted(enc, fh, createdecryptedfilename(filename))
+    elif args.dump:
+        dumpblocks(enc, fh)
 
 
 def main():
@@ -514,9 +684,12 @@ def main():
     parser.add_argument('--verbose', '-v', action='store_true')
     parser.add_argument('--debug', action='store_true', help='abort on exceptions.')
     parser.add_argument('--password', '-p', type=str)
+    parser.add_argument('--privatekey', '-k', type=str)
     parser.add_argument('--hexpassword', '-P', type=str)
     parser.add_argument('--keydata', '-K', type=str)
-    parser.add_argument('--bypasskdf', '-n', action='store_true', help='bypass passphrase hashing - useful for ipsw decryption')
+    parser.add_argument('--skipkdf', '-n', action='store_true', help='skip passphrase hashing - useful for ipsw decryption')
+    parser.add_argument('--save', '-s', action='store_true', help='save decrypted image')
+    parser.add_argument('--dump', '-d', action='store_true', help='hexdump decrypted image')
     parser.add_argument('files', nargs='*', type=str)
 
     args = parser.parse_args()
@@ -525,7 +698,7 @@ def main():
         try:
             print("==>", filename, "<==")
             with open(filename, "rb") as fh:
-                processfile(args, fh)
+                processfile(args, filename, fh)
         except Exception as e:
             print("EXCEPTION %s" % e)
             if args.debug:
