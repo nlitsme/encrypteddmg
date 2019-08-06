@@ -85,7 +85,7 @@ CSSM_APPLE_UNLOCK_TYPE_KEYBAG                   = 3 # master key wrapped via key
 
 class PassphraseWrappedKey:
     """
-    A encrcdsa v2 wrapped key.
+    A encrcdsa v2 password wrapped key.
     """
     wrappedkeyinfo = [
 ( 0x0000, "kdfAlgorithm",         "L"),   # 0x67  CSSM_ALGID_PKCS5_PBKDF2
@@ -380,6 +380,7 @@ class EncrCdsaFile:
             try:
                 keydata = wp.unwrapkey(passphrase, **kwargs)
                 if keydata:
+                    debugprint("keydata = %s" % b2a_hex(keydata))
                     self.setkey(keydata)
                     print("FOUND: passphrase decodes wrappedkey # %d" % i)
                     return True
@@ -615,21 +616,31 @@ class CdsaEncrFile:
         return aes.decrypt(data)
 
 
-def unlockfile(args, enc, fh):
+def unlockfile(args, enc):
+    """
+    unlock the encrypted diskimage in `enc`, 
+    """
+
+    # output all the header values
     enc.dump()
 
+    # determine the passphrase, either specified in ascii, or hex.
     if args.password:
         passphrase = args.password.encode('utf-8')
     elif args.hexpassword:
-        passphrase = a2b_hex(args.hexpassword)
+        passphrase = a2b_hex(args.hexpassword.replace(' ',''))
     else:
         passphrase = None
 
+    # load the private key if any was specified on the commandline.
     if args.privatekey:
         privatekey = Crypto.PublicKey.RSA.importKey(open(args.privatekey, "rb").read())
     else:
         privatekey = None
 
+    # now use the passphrase or private to to unlock
+    # you can also directly specify the keydata, bypassing
+    # the wrapped keys.
     if passphrase is not None:
         return enc.login(passphrase, skipkdf = args.skipkdf)
     elif privatekey is not None:
@@ -638,25 +649,42 @@ def unlockfile(args, enc, fh):
         enc.setkey(a2b_hex(args.keydata))
         return True
 
+
 def savedecrypted(enc, fh, filename):
+    """
+    Write all decrypted blocks to `filename`.
+    """
     with open(filename, "wb") as ofh:
         for bnum in range(enc.nrblocks()):
             data = enc.readblock(fh, bnum)
             ofh.write(data)
 
+
 def dumpblocks(enc, fh):
+    """
+    print all decrypted blocks as hexdump to stdout.
+    """
     for bnum in range(enc.nrblocks()):
         print("-- blk %d" % bnum)
         data = enc.readblock(fh, bnum)
         hexdump(data)
 
+
 def createdecryptedfilename(filename):
+    """
+    Determine a filename to save the decrypted diskimage to.
+    """
     i = filename.rfind(".")
     if i<0:
         return filename + "-decrypted"
     return filename[:i] + "-decrypted" + filename[i:]
 
+
 def processfile(args, filename, fh):
+    """
+    determines the diskimage type, unlocks it,
+    then performs action requested from the commandline.
+    """
     enc = None
     for cls in (EncrCdsaFile, CdsaEncrFile):
         try:
@@ -669,7 +697,7 @@ def processfile(args, filename, fh):
     if not enc:
         print("Did not find an encrypted disk image")
         return
-    if not unlockfile(args, enc, fh):
+    if not unlockfile(args, enc):
         print("unlock failed")
         return
     if args.save:

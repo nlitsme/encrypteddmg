@@ -6,6 +6,35 @@ Both old 'v1' and current 'v2' images are supported.
 This tool can also decrypt iphone rootfilesystem diskimages.
 
 
+normal images
+=============
+
+There are several ways of creating encrypted diskimages
+ * commandline, using hdiutil
+    
+    hdiutil create -srcfolder testfiles -size 16m -fs HFS+ -encryption AES-128 encryptedimage.dmg
+
+ * `Disk Utility.app`  using CMD-N
+
+You can decrypt such images using:
+
+    python3 readencrcdsa.py --save -p test1234 encryptedimage.dmg
+
+This will save the decrypted image as `encryptedimage-decrypted.dmg`
+
+
+certificates
+------------
+
+A special option exists in `hdiutil` to create diskimages which can be decrypted using a RSA privatekey.
+
+    hdiutil create  -srcfolder testfiles -certificate ax509cert.cer -size 16m -fs HFS+ -encryption AES-128  encryptedimage.dmg
+
+Decrypt such an image using the following commandline:
+
+    python3 readencrcdsa.py --save --privatekey private.key encryptedimage.dmg
+
+
 iphone images
 =============
 
