@@ -1,0 +1,36 @@
+digraph DmgEncryptionV2 {
+
+node [shape=record];
+passphrase;
+
+Keydata [ label = "<salt> salt | <iter> count | <iv> blobIv | <blob> keydata"; shape=Mrecord; ];
+
+PBKDF2 [ label = "{<in> input  | <out> output }| {<salt> salt | <iter> count}", xlabel = "PBKDF2" ];
+
+TDES [ label = "{<iv> iv | <key> key} | { <in> input | <out> output }", xlabel = "TDES" ];
+
+AES [ label = "{<iv> iv | <key> key} | { <in> input | <out> output }", xlabel = "AES" ];
+
+blocknum;
+blockdata;
+plaintext;
+HMAC [ label = "{<key> key} | { <in> input | <out> output }", xlabel = "HMAC" ];
+
+
+passphrase -> PBKDF2:in;
+Keydata:salt -> PBKDF2:salt
+Keydata:iter -> PBKDF2:iter
+PBKDF2:out -> TDES:key;
+Keydata:iv -> TDES:iv;
+
+Keydata:blob -> TDES:in;
+
+TDES:out -> HMAC:key;
+TDES:out -> AES:key;
+
+blocknum -> HMAC:in;
+HMAC:out -> AES:iv;
+blockdata -> AES:in;
+AES:out -> plaintext;
+
+}
