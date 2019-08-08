@@ -8,11 +8,12 @@ This tool can also decrypt iphone rootfilesystem diskimages.
 Several types of diskimages exist:
 
  * with the `cdsaencr` v1 header at the end of the file.
-   * passphrase wrapped key
+   * one passphrase wrapped key
  * with the 'encrcdsa' v2 header at the start of the file.
-   * passphrase wrapped key
-   * certificate wrapped key
-   * third unknown option, 'keybag'
+   Can have multiple wrapped keys:
+    * passphrase wrapped key(s)
+    * certificate wrapped key(s)
+    * third unknown option, 'keybag'
 
  * iphone firmware images are a special case of the v2 passphrase
    wrapped keys, where the kdf part is skipped, even though
@@ -22,13 +23,40 @@ normal images
 =============
 
 There are several ways of creating encrypted diskimages
- * commandline, using hdiutil
+ * `Disk Utility.app`  using CMD-N
+ * from the commandline, using hdiutil
     
     hdiutil create -srcfolder testfiles -size 16m -fs HFS+ -encryption AES-128 encryptedimage.dmg
 
- * `Disk Utility.app`  using CMD-N
+In a script, you can use -stdinpass to avoid `hdiutil` to prompt for a password. The entire
+input, including LineFeeds will be used for the password. So this:
 
-You can decrypt such images using:
+    echo test1234 | hdiutil create -stdinpass -size 16m -encryption AES-128 encryptedimage.dmg
+
+Will create an encrypted image where the password is: `test1234 + LF`.
+
+
+mounting
+--------
+
+Disk images can be mounted by opening them in Finder, or using the commandline:
+
+    hdiutil attach encryptedimage.dmg
+
+Which will prompt the user for a password, alternatively, the password can be passed using a script:
+
+    echo -n test1234 | hdiutil attach -stdinpass encryptedimage.dmg
+
+Pass the `-nomount` option When you want to attach without mounting, you can then access the contents
+of the disk image via its `/dev/diskNN` or `/dev/rdiskNN` device.
+
+Pass the `-readonly` when you want to mount the image in read-only mode.
+
+
+decrypting
+----------
+
+You can decrypt such images using my tool:
 
     python3 readencrcdsa.py --save -p test1234 encryptedimage.dmg
 
@@ -45,6 +73,7 @@ A special option exists in `hdiutil` to create diskimages which can be decrypted
 Decrypt such an image using the following commandline:
 
     python3 readencrcdsa.py --save --privatekey private.key encryptedimage.dmg
+
 
 
 iphone firmware images
@@ -75,8 +104,8 @@ OSXSDK
 
 The relevant headers from the MacOSX sdk:
 
-    /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h
-    /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h
+    [Security.framework/Versions/A/Headers/cssmtype.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h)
+    [Security.framework/Versions/A/Headers/cssmapple.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h)
 
 
 The Algorithm
