@@ -5,6 +5,18 @@ A tool for decrypting Apple encrypted disk images.
 Both old 'v1' and current 'v2' images are supported.
 This tool can also decrypt iphone rootfilesystem diskimages.
 
+Several types of diskimages exist:
+
+ * with the `cdsaencr` v1 header at the end of the file.
+   * passphrase wrapped key
+ * with the 'encrcdsa' v2 header at the start of the file.
+   * passphrase wrapped key
+   * certificate wrapped key
+   * third unknown option, 'keybag'
+
+ * iphone firmware images are a special case of the v2 passphrase
+   wrapped keys, where the kdf part is skipped, even though
+   the header does specify use 'pbkdf2'.
 
 normal images
 =============
@@ -35,7 +47,7 @@ Decrypt such an image using the following commandline:
     python3 readencrcdsa.py --save --privatekey private.key encryptedimage.dmg
 
 
-iphone images
+iphone firmware images
 =============
 
 Iphone images are downloaded as `.ipsw` files.
@@ -65,6 +77,47 @@ The relevant headers from the MacOSX sdk:
 
     /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h
     /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h
+
+
+The Algorithm
+=============
+
+v2
+input: passphrase, blocknum, encrypteddata
+
+        hashedpw = pbkdf2(passphrase, keydata.kdfSalt[:keydata.kdfSaltLen], keydata.kdfIterationCount)
+
+        deskey = hashedpw[:keydata.blobEncKeyBits//8]
+
+        iv = keydata.blobEncIv[:keydata.blobEncIvLen]
+
+        des = DES3.new(deskey, mode=DES3.MODE_CBC, IV=iv)
+        unwrappeddata = des.decrypt(keydata.encryptedKeyblob[:keydata.encryptedKeyblobLen])
+        keydata = remove_pkcs7_padding(unwrappeddata, keydata.blobEncIvLen)
+
+        aeskey = keydata[:dmghdr.keyBits//8]
+        hmackey = keydata[dmghdr.keyBits//8:]
+
+        iv = hmacsha1(hmackey, struct.pack(">L", blocknum))
+        aes = AES.new(aeskey, mode=AES.MODE_CBC, IV=iv[:dmghdr.blockIvLen])
+        decrypteddata = aes.decrypt(encrypteddata)
+
+
+or as a simplied diagram:
+
+![V2 DMG Encryption](v2.png)
+
+
+Possible weaknesses
+===================
+
+Note that getting the wrong hmackey, will result in only the first 16 bytes of each disk block being incorrect.
+This makes it possible to swap diskblocks around with only minimal 'damage' to the block.
+In practice maybe not of much use, since the contents of the dmg is usually compressed.
+
+I noticed that in practice the HMAC key and the AES key are usually the same in the unwrapped keydata.
+They could have been different, but apparently Apple's disk image tools create the keyblob with identical keys.
+Not a major issue, but it does mean less entropy is used in the algorithm.
 
 
 AUTHOR
