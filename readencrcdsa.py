@@ -398,8 +398,15 @@ class EncrCdsaFile:
         """
         fh.seek(self.offsetToDataStart + blocknum * self.bytesPerBlock)
         data = fh.read(self.bytesPerBlock)
+
+        # because: self.ivkeyAlgorithm == CSSM_ALGID_SHA1HMAC
+        # sha1 implying: self.ivkeyBits == 160
         iv = hmacsha1(self.hmackey, struct.pack(">L", blocknum))
-        aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:16])
+
+        # because: self.blockAlgorithm == CSSM_ALGID_AES
+        # because: self.blockMode == CSSM_ALGMODE_CBC_IV8 
+        aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:self.blockIvLen])
+
         data = aes.decrypt(data)
         if blocknum == self.nrblocks() - 1:
             trunk = self.dataLen % self.bytesPerBlock
@@ -535,6 +542,27 @@ class CdsaEncrFile:
 
         o += 0x104
 
+    def isvalid(self):
+        """
+        Check if this v1 header uses our supported algorithms.
+        """
+        if self.blobEncAlgorithm != CSSM_ALGID_3DES_3KEY_EDE:
+            print("unsupported blobEncAlgorithm: %d" % self.blobEncAlgorithm)
+        elif self.blobEncPadding != CSSM_PADDING_PKCS7:
+            print("unsupported blobEncPadding : %d" % self.blobEncPadding)
+        elif self.blobEncMode != CSSM_ALGMODE_CBCPadIV8:
+            print("unsupported blobEncMode : %d" % self.blobEncMode)
+        elif self.kdfAlgorithm != CSSM_ALGID_PKCS5_PBKDF2:
+            print("unsupported kdfAlgorithm : %d" % self.kdfAlgorithm)
+        elif self.blockMode != CSSM_ALGMODE_CBC_IV8:
+            print("unsupported blockMode : %d" % self.blockMode)
+        elif self.blockAlgorithm != CSSM_ALGID_AES:
+            print("unsupported blockAlgorithm : %d" % self.blockAlgorithm)
+        elif self.hmacAlgorithm != CSSM_ALGID_SHA1HMAC:
+            print("unsupported hmacAlgorithm : %d" % self.hmacAlgorithm)
+        else:
+            return True
+
     def dump(self):
         """
         Prints all info found in the header.
@@ -612,7 +640,7 @@ class CdsaEncrFile:
         fh.seek(self.offsetToDataStart + blocknum * self.bytesPerBlock)
         data = fh.read(self.bytesPerBlock)
         iv = hmacsha1(self.hmackey, struct.pack(">L", blocknum))
-        aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:16])
+        aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:self.blockIvLen])
         return aes.decrypt(data)
 
 
