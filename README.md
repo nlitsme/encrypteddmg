@@ -99,15 +99,6 @@ Alternatively, when you know the master key, you can specify this directly using
     python3 readencrcdsa.py -K 7d779fed28961506ca9443de210224f211790192b2a2308b8bc0e7d4a2ca61a68e26200e ipsw/018-5302-002.dmg
 
 
-OSXSDK
-======
-
-The relevant headers from the MacOSX sdk:
-
-    [Security.framework/Versions/A/Headers/cssmtype.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h)
-    [Security.framework/Versions/A/Headers/cssmapple.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h)
-
-
 The Algorithm
 =============
 
@@ -147,6 +138,33 @@ In practice maybe not of much use, since the contents of the dmg is usually comp
 I noticed that in practice the HMAC key and the AES key are usually the same in the unwrapped keydata.
 They could have been different, but apparently Apple's disk image tools create the keyblob with identical keys.
 Not a major issue, but it does mean less entropy is used in the algorithm.
+
+
+OSXSDK
+======
+
+The relevant headers from the MacOSX sdk:
+
+    [Security.framework/Versions/A/Headers/cssmtype.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h)
+    [Security.framework/Versions/A/Headers/cssmapple.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h)
+
+
+research
+========
+
+Several projects i took inspiration from:
+
+* [apfs-fuse](https://github.com/sgan81/apfs-fuse)
+   * for instance: [DiskImageFile.cpp](https://github.com/sgan81/apfs-fuse/blob/master/ApfsLib/DiskImageFile.cpp)
+* [catacombae/dmgextractor](https://github.com/unsound/dmgextractor/tree/master/src/org/catacombae/dmg/encrypted)
+   * see the (dmg/encrypted)[https://github.com/unsound/dmgextractor/tree/master/src/org/catacombae/dmg/encrypted] folder
+
+* [libfvde](https://github.com/libyal/libfvde/)
+* [macosxbootloader](https://github.com/luckyone2/macosxbootloader)
+* [vilefault](https://github.com/Alanaktion/vilefault)
+
+Also, i decompiled the `DiskImages` framework binary, which has functions like: 
+    `CEncryptedEncoding::loadHeaderAndKeys`, or `CEncryptedEncoding::decodeV1Header`
 
 
 AUTHOR
