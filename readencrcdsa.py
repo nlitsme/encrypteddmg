@@ -73,6 +73,45 @@ def remove_pkcs7_padding(data, blocksize):
             raise Exception("invalid padding")
     return data[:-padlen]
 
+
+class Struct:
+    def __init__(self, *args):
+        if len(args)==1 and type(args[0])==bytes:
+            self.parse(args[0])
+    def dumplist(self, o, k, v):
+        if not v:
+            print("%04x: %-40s []" % (o, k))
+        elif type(v[0]) == int:
+            print("%04x: %-40s [%s]" % (o, k, ", ".join("0x%08x" % _ for _ in v)))
+        elif isinstance(v[0], Struct):
+            for item in v:
+                item.dump()
+        else:
+            print("%04x: %-40s %s" % (o, k, v))
+
+    def dumpval(self, o, k, v):                       
+        if isinstance(v, Struct):
+            v.dump()                               
+        elif type(v) == bytes:
+            print("%04x: %-40s %s" % (o, k, b2a_hex(v)))
+        elif type(v) == int:
+            print("%04x: %-40s 0x%08x" % (o, k, v))
+        elif type(v) == list:
+            self.dumplist(o, k, v)
+        else:
+            print("%04x: %-40s: %s" % (o, k, v))
+
+    def dump(self):
+        if hasattr(self, "header"):
+            self.header.dump()
+        print("====== %s ====== <<" % self.__class__.__name__)
+        for o, aname, atype in self.fieldinfo:
+            val = getattr(self, aname)
+            self.dumpval(o, aname, val)
+        print(">>")
+
+
+
 CSSM_ALGID_PKCS5_PBKDF2 = 0x67
 CSSM_ALGID_3DES_3KEY_EDE  = 0x11
 CSSM_PADDING_PKCS7 = 7
@@ -83,11 +122,11 @@ CSSM_APPLE_UNLOCK_TYPE_KEY_DIRECT               = 1 # master secret key stored d
 CSSM_APPLE_UNLOCK_TYPE_WRAPPED_PRIVATE          = 2 # master key wrapped by public key
 CSSM_APPLE_UNLOCK_TYPE_KEYBAG                   = 3 # master key wrapped via keybag
 
-class PassphraseWrappedKey:
+class PassphraseWrappedKey(Struct):
     """
     A encrcdsa v2 password wrapped key.
     """
-    wrappedkeyinfo = [
+    fieldinfo = [
 ( 0x0000, "kdfAlgorithm",         "L"),   # 0x67  CSSM_ALGID_PKCS5_PBKDF2
 ( 0x0004, "kdfIterationCount",    "Q"),   # between 0x10000 and 0x50000
 ( 0x000c, "kdfSaltLen",           "L"),   # in bytes - 20
@@ -101,7 +140,7 @@ class PassphraseWrappedKey:
 ( 0x0064, "encryptedKeyblobLen",  "L"),   # in bytes 48 or 64
 ( 0x0068, "encryptedKeyblob",     "64s"), 
     ]
-    def __init__(self, data):
+    def parse(self, data):
         (
         self.kdfAlgorithm,     # CSSM_ALGID_PKCS5_PBKDF2 
         self.kdfIterationCount, 
@@ -116,15 +155,6 @@ class PassphraseWrappedKey:
         self.encryptedKeyblobLen,  # 0x30, or 0x40   in bytes
         ) = struct.unpack(">LQL32sL32s5L", data[:0x68])
         self.encryptedKeyblob = data[0x68:]
-
-    def dump(self):
-        print("------ PassphraseWrappedKey ------")
-        for o, aname, atype in self.wrappedkeyinfo:
-            val = getattr(self, aname)
-            if type(val) == bytes:
-                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
-            else:
-                print("%04x: %-40s 0x%08x" % (o, aname, val))
 
     def isvalid(self):
         """
@@ -167,11 +197,11 @@ class PassphraseWrappedKey:
 
         return keydata[:-5]
 
-class CertificateWrappedKey:
+class CertificateWrappedKey(Struct):
     """
     A encrcdsa v2 cert wrapped key.
     """
-    wrappedkeyinfo = [
+    fieldinfo = [
 ( 0x0000, "pubkeyHashLength",     "L"),   # 0x14 
 ( 0x0004, "pubkeyHash",           "20s"),
 ( 0x0018, "unk1",                 "L"),   # 0
@@ -183,7 +213,7 @@ class CertificateWrappedKey:
 ( 0x0030, "unk6",                 "L"),   # 0x100
 ( 0x0068, "wrappedKey",           "256s"), 
     ]
-    def __init__(self, data):
+    def parse(self, data):
         (
         self.pubkeyHashLength,     # CSSM_ALGID_PKCS5_PBKDF2 
         self.pubkeyHash,
@@ -196,15 +226,6 @@ class CertificateWrappedKey:
         self.unk6, 
         self.wrappedKey,       # 0x14
         ) = struct.unpack(">L20s7L256s", data[:0x134])
-
-    def dump(self):
-        print("------ CertificateWrappedKey ------")
-        for o, aname, atype in self.wrappedkeyinfo:
-            val = getattr(self, aname)
-            if type(val) == bytes:
-                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
-            else:
-                print("%04x: %-40s 0x%08x" % (o, aname, val))
 
     def isvalid(self):
         """
@@ -230,26 +251,17 @@ class CertificateWrappedKey:
         return keydata[:-5]
 
 
-class BaggedKey:
+class BaggedKey(Struct):
     """
     A encrcdsa v2 key-bag
 
     TODO - figure out how this works
     """
-    wrappedkeyinfo = [
+    fieldinfo = [
 ( 0x0000, "keybag",     "128s"),
     ]
     def __init__(self, data):
         self.keybag = data
-
-    def dump(self):
-        print("------ KeyBag ------")
-        for o, aname, atype in self.wrappedkeyinfo:
-            val = getattr(self, aname)
-            if type(val) == bytes:
-                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
-            else:
-                print("%04x: %-40s 0x%08x" % (o, aname, val))
 
     def isvalid(self):
         """
@@ -268,11 +280,11 @@ CSSM_ALGMODE_CBC_IV8  = 5
 CSSM_ALGID_AES = 0x80000001
 CSSM_ALGID_SHA1HMAC = 0x5b
 
-class EncrCdsaFile:
+class EncrCdsaFile(Struct):
     """
     Interface to a encrcdsa v2 file.
     """
-    headerinfo = [
+    fieldinfo = [
 ( 0x0000, "signature",           "8s"),
 ( 0x0008, "version",             "L"),   # 2
 ( 0x000c, "blockIvLen",          "L"),   # 16
@@ -286,6 +298,8 @@ class EncrCdsaFile:
 ( 0x0038, "dataLen",             "Q"),   # ... a little less than the total nr of bytes
 ( 0x0040, "offsetToDataStart",   "Q"),   # 0x01de00
 ( 0x0048, "nritems",             "L"),   # 1
+( 0x004C, "keyitems",            "*"),   # list of 20 byte records
+( 0xFFFF, "wrappedkeys",         "*"),   # decoded key items
 ]
     @staticmethod
     def hasmagic(fh):
@@ -300,9 +314,7 @@ class EncrCdsaFile:
     def nrblocks(self):
         return (self.dataLen-1) // self.bytesPerBlock + 1
 
-    def __init__(self, fh):
-        fh.seek(0, io.SEEK_SET)
-        hdr = fh.read(0x10000)
+    def parse(self, hdr):
         (
         self.signature,        # "encrcdsa"
         self.version,          #  2
@@ -341,20 +353,10 @@ class EncrCdsaFile:
             elif tp == CSSM_APPLE_UNLOCK_TYPE_KEYBAG:
                 self.wrappedkeys.append(BaggedKey(hdr[of:of+sz]))
 
-
-    def dump(self):
-        """
-        Prints all info found in the header.
-        """
-        print("------ EncrCdsaFile ------")
-        for o, aname, atype in self.headerinfo:
-            val = getattr(self, aname)
-            if type(val) == bytes:
-                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
-            else:
-                print("%04x: %-40s 0x%08x" % (o, aname, val))
-        for wp in self.wrappedkeys:
-            wp.dump()
+    def load(self, fh):
+        fh.seek(0, io.SEEK_SET)
+        hdr = fh.read(0x10000)
+        self.parse(hdr)
 
     def isvalid(self):
         """
@@ -414,11 +416,11 @@ class EncrCdsaFile:
         return data
 
 
-class CdsaEncrFile:
+class CdsaEncrFile(Struct):
     """
     Interface to a cdsaencr v1 file.
     """
-    headerinfo = [
+    fieldinfo = [
 ( 0x0000, "unknownGuid",         "16s" ),  # 
 ( 0x0010, "bytesPerBlock",       "L"   ),  # 
 ( 0x0014, "blobEncAlgorithm",    "L"   ),  # CSSM_ALGID_3DES_3KEY_EDE
@@ -471,7 +473,7 @@ class CdsaEncrFile:
     def nrblocks(self):
         return (self.offsetToHeader-1) // self.bytesPerBlock + 1
 
-    def __init__(self, fh):
+    def load(self, fh):
         self.offsetToDataStart = 0
 
         fh.seek(-20, io.SEEK_END)
@@ -487,6 +489,9 @@ class CdsaEncrFile:
         infohdr = fh.read(0x4e8)
         if not infohdr:
             raise Exception("no infohdr")
+        self.parse(infohdr)
+
+    def parse(self, infohdr):
         (
             self.unknownGuid,
             self.bytesPerBlock,
@@ -562,18 +567,6 @@ class CdsaEncrFile:
             print("unsupported hmacAlgorithm : %d" % self.hmacAlgorithm)
         else:
             return True
-
-    def dump(self):
-        """
-        Prints all info found in the header.
-        """
-        print("------ CdsaEncrFile ------")
-        for o, aname, atype in self.headerinfo:
-            val = getattr(self, aname)
-            if type(val) == bytes:
-                print("%04x: %-40s %s" % (o, aname, b2a_hex(val)))
-            else:
-                print("%04x: %-40s 0x%08x" % (o, aname, val))
 
     def getHmacKey(self, passphrase, **kwargs):
         """
@@ -717,7 +710,10 @@ def processfile(args, filename, fh):
     for cls in (EncrCdsaFile, CdsaEncrFile):
         try:
             if cls.hasmagic(fh):
-                enc = cls(fh)
+                enc = cls()
+
+                enc.load(fh)
+
         except Exception as e:
             print("ERR %s" % e)
             if args.debug:
