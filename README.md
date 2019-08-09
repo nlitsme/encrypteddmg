@@ -145,8 +145,8 @@ OSXSDK
 
 The relevant headers from the MacOSX sdk:
 
-    [Security.framework/Versions/A/Headers/cssmtype.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h)
-    [Security.framework/Versions/A/Headers/cssmapple.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h)
+ * [Security.framework/Versions/A/Headers/cssmtype.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmtype.h)
+ * [Security.framework/Versions/A/Headers/cssmapple.h](https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.13.sdk/System/Library/Frameworks/Security.framework/Versions/A/Headers/cssmapple.h)
 
 
 research
@@ -156,8 +156,8 @@ Several projects i took inspiration from:
 
 * [apfs-fuse](https://github.com/sgan81/apfs-fuse)
    * for instance: [DiskImageFile.cpp](https://github.com/sgan81/apfs-fuse/blob/master/ApfsLib/DiskImageFile.cpp)
-* [catacombae/dmgextractor](https://github.com/unsound/dmgextractor/tree/master/src/org/catacombae/dmg/encrypted)
-   * see the (dmg/encrypted)[https://github.com/unsound/dmgextractor/tree/master/src/org/catacombae/dmg/encrypted] folder
+* [catacombae/dmgextractor](https://github.com/unsound/dmgextractor)
+   * see the [dmg/encrypted](https://github.com/unsound/dmgextractor/tree/master/src/org/catacombae/dmg/encrypted) folder
 
 * [libfvde](https://github.com/libyal/libfvde/)
 * [macosxbootloader](https://github.com/luckyone2/macosxbootloader)
