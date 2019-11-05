@@ -732,7 +732,7 @@ def processfile(args, filename, fh):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='efidump')
+    parser = argparse.ArgumentParser(description='A tool for decrypting Apple encrypted disk images.')
     parser.add_argument('--verbose', '-v', action='store_true')
     parser.add_argument('--debug', action='store_true', help='abort on exceptions.')
     parser.add_argument('--password', '-p', type=str)
