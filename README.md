@@ -62,6 +62,10 @@ You can decrypt such images using my tool:
 
 This will save the decrypted image as `encryptedimage-decrypted.dmg`
 
+When the passphrase is difficult to encode on a shell commandline, you can pass it as a hex string using the `-P` option:
+
+    python3 readencrcdsa.py --save -P "74 65 73 74 31 32 33 34 0a" encryptedimage.dmg
+
 
 certificates
 ------------
