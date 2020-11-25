@@ -215,7 +215,7 @@ class CertificateWrappedKey(Struct):
     ]
     def parse(self, data):
         (
-        self.pubkeyHashLength,     # CSSM_ALGID_PKCS5_PBKDF2 
+        self.pubkeyHashLength,# 0x14
         self.pubkeyHash,
         self.unk1, 
         self.unk2, 
@@ -224,7 +224,7 @@ class CertificateWrappedKey(Struct):
         self.unk4, 
         self.unk5, 
         self.unk6, 
-        self.wrappedKey,       # 0x14
+        self.wrappedKey,       
         ) = struct.unpack(">L20s7L256s", data[:0x134])
 
     def isvalid(self):
@@ -407,6 +407,7 @@ class EncrCdsaFile(Struct):
 
         # because: self.blockAlgorithm == CSSM_ALGID_AES
         # because: self.blockMode == CSSM_ALGMODE_CBC_IV8 
+        debugprint("blk ofs: %x, iv=%s" % (self.offsetToDataStart + blocknum * self.bytesPerBlock, b2a_hex(iv)))
         aes = AES.new(self.aeskey, mode=AES.MODE_CBC, IV=iv[:self.blockIvLen])
 
         data = aes.decrypt(data)
@@ -618,6 +619,8 @@ class CdsaEncrFile(Struct):
         self.aeskey = self.getAesKey(passphrase, **kwargs)
         self.hmackey = self.getHmacKey(passphrase, **kwargs)
         self.ikey = self.getIntegrityKey(passphrase, **kwargs)
+
+        debugprint("login -> aes=%s, hmac=%s" % (b2a_hex(self.aeskey), b2a_hex(self.hmackey)))
 
         return True
 
